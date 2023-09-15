@@ -68,7 +68,7 @@ val courses = mutableMapOf<Int, Int>()
 suspend fun buildCourseIndexes()
 {
     val response = fetchStudentDataSubPage("weeklysummary")
-    val pattern = "\\b${Regex.escape("showAssignmentsByMPAndCourse")}\\b".toRegex()
+    val pattern = "showAssignmentsByMPAndCourse\\('\\d+', '\\d'\\)".toRegex()
     val matches = pattern.findAll(response)
 
     val parsedCoursePairs = matches
