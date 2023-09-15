@@ -5,6 +5,13 @@ import io.ktor.client.plugins.cookies.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
+import it.skrape.core.htmlDocument
+import it.skrape.matchers.toBe
+import it.skrape.matchers.toContain
+import it.skrape.selects.html5.b
+import it.skrape.selects.html5.div
+import it.skrape.selects.html5.style
+import it.skrape.selects.text
 import java.io.File
 import java.util.*
 
@@ -56,17 +63,59 @@ fun ensureConfigCreated() = check(
     "Config file is not created! Read configuration.properties.example and rename it to configuration.properties."
 }
 
-val courses = mutableMapOf<Pair<Int, Int>, String>()
+val courses = mutableMapOf<Int, Int>()
 
 suspend fun buildCourseIndexes()
 {
-    val response = fetchStudentDataSubPage("")
+    val response = fetchStudentDataSubPage("weeklysummary")
+    val pattern = "\\b${Regex.escape("showAssignmentsByMPAndCourse")}\\b".toRegex()
+    val matches = pattern.findAll(response)
 
-    println(response)
-    println(response.split("\n")
+    val parsedCoursePairs = matches
+        .map {
+            val functionDecEnd = it.range.last
+            response.substring(
+                (functionDecEnd + 2)..(functionDecEnd + 10)
+            )
+        }
         .filter {
-            it.contains("goToCourseSummary")
-        })
+            it.startsWith("'")
+        }
+        .map {
+            it.split(",")
+        }
+        .map { codes ->
+            codes
+                .map {
+                    it.removeSurrounding("'")
+                }
+                .map { it.toInt() }
+        }
+        .associateBy { it.first() }
+        .mapValues {
+            it.value.last()
+        }
+
+    courses.putAll(parsedCoursePairs)
+
+    courses.forEach { (k, v) ->
+        val resp = fetchStudentDataSubPage(
+            page = "coursesummary",
+            params = "&courseCode=$k&courseSection=$v"/** TODO required MP? + "&mp=MP1" **/
+        )
+
+        if (k == 320)
+        {
+            println(resp)
+            htmlDocument(resp) {
+                div {
+                    findFirst {
+                        text toContain "Marking Period"
+                    }
+                }
+            }
+        }
+    }
 }
 
 val client = HttpClient(CIO) {
@@ -100,18 +149,22 @@ suspend fun updateSessionId()
                     GenesisProps.password()
                 }"
             )
+
+            headers {
+                defaultRequestHeaders.forEach { (t, u) -> append(t, u) }
+            }
         }
 
     req.execute()
 }
 
-suspend fun fetchStudentDataSubPage(subPage: String): String
+suspend fun fetchStudentDataSubPage(page: String, params: String = ""): String
 {
     val urlString = "https://parents.c1.genesisedu.net/${
         GenesisProps.organization()
-    }/parents?tab1=studentdata&tab2=gradebook&tab3=coursesummary&studentid=${
+    }/parents?tab1=studentdata&tab2=gradebook&tab3=$page&studentid=${
         GenesisProps.studentId()
-    }&action=form$subPage"
+    }&action=form$params"
 
     return client
         .prepareGet(urlString) {

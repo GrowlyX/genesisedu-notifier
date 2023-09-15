@@ -16,6 +16,8 @@ dependencies {
     implementation("io.ktor:ktor-client-core:$ktor_version")
     implementation("io.ktor:ktor-client-cio:$ktor_version")
     implementation("io.ktor:ktor-client-encoding:$ktor_version")
+
+    implementation("it.skrape:skrapeit:1.2.2")
 }
 
 tasks.test {
