@@ -201,10 +201,19 @@ suspend fun rebuildAssignmentIndexes(client: WebhookClient)
         if (course.assignments.size < assignments.size)
         {
             val prevSize = course.assignments.size
+            val prevAssignments = course.assignments
             synchronized(course.lockObject) {
                 course.assignments.clear()
                 course.assignments.addAll(assignments)
             }
+
+            val newAssignments = course.assignments
+                .filterNot {
+                    // might not work properly?
+                    prevAssignments.any { assignment ->
+                        assignment.date == it.date && assignment.name == it.name
+                    }
+                }
 
             if (!initialIndexBuild)
             {
@@ -217,7 +226,12 @@ suspend fun rebuildAssignmentIndexes(client: WebhookClient)
                         )
                     )
                     .setDescription(
-                        "A new grade has been posted for your **${course.name}** course. Click the title to see grade details!"
+                        """
+                            New grades have been posted for your **${course.name}** course.:
+                            ${newAssignments.joinToString("\n") { "> ${it.name}: ${it.gradePercentage}" }}
+                            
+                            Click the title to see additional grade details!
+                        """.trimIndent()
                     )
                     .build()
 
