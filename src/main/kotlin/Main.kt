@@ -64,10 +64,24 @@ data class Assignment(
     var grade: String? = null
 )
 {
+    enum class GradeClassifier(
+        val range: IntRange
+    )
+    {
+        Good(90..<200),
+        Fine(80..<90),
+        Bad(0..<80)
+    }
+
     val gradePercentage: Int?
         get() = grade
             ?.removeSuffix("%")
             ?.toInt()
+
+    fun classifyGrade() = GradeClassifier.entries
+        .firstOrNull {
+            (gradePercentage ?: -1) in it.range
+        }
 }
 
 data class Course(
@@ -76,7 +90,7 @@ data class Course(
     val lockObject: Any = Any()
 )
 {
-    suspend fun buildCourseSummaryURL() = buildStudentDataSubPageURL(
+    fun buildCourseSummaryURL() = buildStudentDataSubPageURL(
         "coursesummary", "&courseCode=$code&courseSection=$section"
     )
 
@@ -208,6 +222,8 @@ suspend fun rebuildAssignmentIndexes(client: WebhookClient)
                     .build()
 
                 client.send(embed).join()
+                client.send("@everyone").join()
+
                 println("${course.name} received updates with ${assignments.size - prevSize} new assignments! Webhook message sent.")
             }
         }

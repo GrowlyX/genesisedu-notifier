@@ -2,4 +2,4 @@ organization=njdoe
 username=email@email.com
 password=password
 student_id=123456
-webhook
+webhook=https://discord.com/api/webhooks/id/token
