@@ -1,5 +1,8 @@
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+
 plugins {
-    kotlin("jvm") version "1.9.0"
+    kotlin("jvm") version "1.9.10"
+    id("com.github.johnrengelman.shadow") version "7.1.2"
     application
 }
 
@@ -25,6 +28,13 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+tasks.withType<ShadowJar> {
+    archiveClassifier.set("")
+    archiveFileName.set(
+        "on-bot-kotlin-${project.name}.jar"
+    )
 }
 
 kotlin {
