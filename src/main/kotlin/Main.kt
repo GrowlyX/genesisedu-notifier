@@ -6,12 +6,7 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import it.skrape.core.htmlDocument
-import it.skrape.matchers.toBe
-import it.skrape.matchers.toContain
-import it.skrape.selects.html5.b
-import it.skrape.selects.html5.div
-import it.skrape.selects.html5.style
-import it.skrape.selects.text
+import it.skrape.selects.html5.*
 import java.io.File
 import java.util.*
 
@@ -63,58 +58,57 @@ fun ensureConfigCreated() = check(
     "Config file is not created! Read configuration.properties.example and rename it to configuration.properties."
 }
 
-val courses = mutableMapOf<Int, Int>()
+data class Course(
+    val code: Int, val section: Int, var name: String? = null
+)
 
+val courses = mutableListOf<Course>()
+
+val coursePattern = "showAssignmentsByMPAndCourse\\('\\d+','\\d'\\)".toRegex()
+val numericPattern = "\\d+".toRegex()
 suspend fun buildCourseIndexes()
 {
     val response = fetchStudentDataSubPage("weeklysummary")
-    val pattern = "showAssignmentsByMPAndCourse\\('\\d+', '\\d'\\)".toRegex()
-    val matches = pattern.findAll(response)
+    val matches = coursePattern.findAll(response)
 
     val parsedCoursePairs = matches
         .map {
-            val functionDecEnd = it.range.last
-            response.substring(
-                (functionDecEnd + 2)..(functionDecEnd + 10)
+            val results = response.substring(
+                it.range.first..it.range.last
             )
+            numericPattern.findAll(results).toList()
+                .map(MatchResult::value)
         }
-        .filter {
-            it.startsWith("'")
-        }
+        .toList()
         .map {
-            it.split(",")
-        }
-        .map { codes ->
-            codes
-                .map {
-                    it.removeSurrounding("'")
-                }
-                .map { it.toInt() }
-        }
-        .associateBy { it.first() }
-        .mapValues {
-            it.value.last()
+            // we don't want to flatmap it here
+            it.map(String::toInt)
         }
 
-    courses.putAll(parsedCoursePairs)
+    courses.addAll(parsedCoursePairs.map {
+        Course(code = it[0], section = it[1])
+    })
 
-    courses.forEach { (k, v) ->
+    courses.forEach { course ->
         val resp = fetchStudentDataSubPage(
             page = "coursesummary",
-            params = "&courseCode=$k&courseSection=$v"/** TODO required MP? + "&mp=MP1" **/
+            params = "&courseCode=${course.code}&courseSection=${course.section}"
         )
 
-        if (k == 320)
-        {
-            println(resp)
-            htmlDocument(resp) {
-                div {
-                    findFirst {
-                        text toContain "Marking Period"
+        val courseName = htmlDocument(resp) {
+            table {
+                select {
+                    findLast {
+                        option {
+                            withAttribute = "value" to "${course.code}:${course.section}"
+                            findFirst { text }
+                        }
                     }
                 }
             }
         }
+
+        course.name = courseName
     }
 }
 
@@ -187,8 +181,7 @@ suspend fun main()
     )
 
     buildCourseIndexes()
-
-    /*fetchStudentDataSubPage(
-        "&courseCode=123&courseSection=1&mp=MP1"
-    )*/
+    println("Built course indexes. ${courses.size} courses found. ${
+        courses.count { it.name in GenesisProps.courses }
+    } courses being listened to are available.")
 }
