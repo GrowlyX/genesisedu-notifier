@@ -19,6 +19,8 @@ dependencies {
 
     implementation("it.skrape:skrapeit:1.2.2")
     testImplementation("junit:junit:4.13.2")
+
+    implementation("club.minnced:discord-webhooks:0.8.4")
 }
 
 tasks.test {

@@ -1,3 +1,6 @@
+import club.minnced.discord.webhook.WebhookClient
+import club.minnced.discord.webhook.send.WebhookEmbed
+import club.minnced.discord.webhook.send.WebhookEmbedBuilder
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.compression.*
@@ -27,6 +30,7 @@ object GenesisProps
     fun password() = handle["password"]
     fun organization() = handle["organization"]
     fun studentId() = handle["student_id"]
+    fun webhook() = handle["webhook"]
 }
 
 object SessionIDInterceptor : CookiesStorage
@@ -72,6 +76,10 @@ data class Course(
     val lockObject: Any = Any()
 )
 {
+    suspend fun buildCourseSummaryURL() = buildStudentDataSubPageURL(
+        "coursesummary", "&courseCode=$code&courseSection=$section"
+    )
+
     suspend fun courseSummary() = fetchStudentDataSubPage(
         page = "coursesummary",
         params = "&courseCode=$code&courseSection=$section"
@@ -127,7 +135,7 @@ suspend fun buildCourseIndexes()
 }
 
 var initialIndexBuild = true
-suspend fun rebuildAssignmentIndexes()
+suspend fun rebuildAssignmentIndexes(client: WebhookClient)
 {
     courses.forEach { course ->
         val summary = course.courseSummary()
@@ -186,7 +194,21 @@ suspend fun rebuildAssignmentIndexes()
 
             if (!initialIndexBuild)
             {
-                println("${course.name} received updates with ${assignments.size - prevSize} new assignments!")
+                val embed = WebhookEmbedBuilder()
+                    .setColor(0x00E3FF)
+                    .setTitle(
+                        WebhookEmbed.EmbedTitle(
+                            "Grade posted",
+                            course.buildCourseSummaryURL()
+                        )
+                    )
+                    .setDescription(
+                        "A new grade has been posted for your **${course.name}** course. Click the title to see grade details!"
+                    )
+                    .build()
+
+                client.send(embed).join()
+                println("${course.name} received updates with ${assignments.size - prevSize} new assignments! Webhook message sent.")
             }
         }
     }
@@ -234,16 +256,18 @@ suspend fun updateSessionId()
     req.execute()
 }
 
+fun buildStudentDataSubPageURL(page: String, params: String = "") = "https://parents.c1.genesisedu.net/${
+    GenesisProps.organization()
+}/parents?tab1=studentdata&tab2=gradebook&tab3=$page&studentid=${
+    GenesisProps.studentId()
+}&action=form$params"
+
 suspend fun fetchStudentDataSubPage(page: String, params: String = ""): String
 {
-    val urlString = "https://parents.c1.genesisedu.net/${
-        GenesisProps.organization()
-    }/parents?tab1=studentdata&tab2=gradebook&tab3=$page&studentid=${
-        GenesisProps.studentId()
-    }&action=form$params"
-
     return client
-        .prepareGet(urlString) {
+        .prepareGet(
+            buildStudentDataSubPageURL(page, params)
+        ) {
             headers {
                 defaultRequestHeaders.forEach { (t, u) -> append(t, u) }
             }
@@ -263,6 +287,11 @@ fun main()
         println("Built course indexes. ${courses.size} courses found.")
     }
 
+    val client = WebhookClient
+        .withUrl(
+            GenesisProps.webhook().toString()
+        )
+
     while (true)
     {
         val initial = initialIndexBuild
@@ -272,14 +301,16 @@ fun main()
         }
 
         runBlocking {
-            rebuildAssignmentIndexes()
+            rebuildAssignmentIndexes(client)
         }
 
         if (initial)
         {
-            println("Rebuilt assignment indexes. Took ${
-                (System.currentTimeMillis() - startMillis) / 1000L
-            } seconds to initialize the app.")
+            println(
+                "Rebuilt assignment indexes. Took ${
+                    (System.currentTimeMillis() - startMillis) / 1000L
+                } seconds to initialize the app."
+            )
             println("Assignment indexes will be updated every minute. Please keep this app open!")
         }
 
