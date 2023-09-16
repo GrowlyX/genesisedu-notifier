@@ -7,6 +7,7 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import it.skrape.core.htmlDocument
 import it.skrape.selects.html5.*
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.util.*
 
@@ -21,10 +22,6 @@ object GenesisProps
                     .inputStream()
             )
         }
-
-    val courses by lazy {
-        handle["courses"].toString().split(",")
-    }
 
     fun username() = handle["username"]
     fun password() = handle["password"]
@@ -43,7 +40,6 @@ object SessionIDInterceptor : CookiesStorage
                 if (currentSessionId != sessionId)
                 {
                     currentSessionId = sessionId
-                    println("updating to new session id -> $currentSessionId")
                 }
             }
         }
@@ -58,14 +54,36 @@ fun ensureConfigCreated() = check(
     "Config file is not created! Read configuration.properties.example and rename it to configuration.properties."
 }
 
-data class Course(
-    val code: Int, val section: Int, var name: String? = null
+data class Assignment(
+    val date: String,
+    val name: String,
+    var grade: String? = null
 )
+{
+    val gradePercentage: Int?
+        get() = grade
+            ?.removeSuffix("%")
+            ?.toInt()
+}
+
+data class Course(
+    val code: Int, val section: Int, var name: String? = null,
+    val assignments: MutableList<Assignment> = mutableListOf(),
+    val lockObject: Any = Any()
+)
+{
+    suspend fun courseSummary() = fetchStudentDataSubPage(
+        page = "coursesummary",
+        params = "&courseCode=$code&courseSection=$section"
+    )
+}
 
 val courses = mutableListOf<Course>()
 
 val coursePattern = "showAssignmentsByMPAndCourse\\('\\d+','\\d'\\)".toRegex()
 val numericPattern = "\\d+".toRegex()
+val dateMatcher = "[\\s\\S]* \\d+\\/\\d+".toRegex()
+val percentageMatcher = "\\d+%".toRegex()
 suspend fun buildCourseIndexes()
 {
     val response = fetchStudentDataSubPage("weeklysummary")
@@ -90,12 +108,8 @@ suspend fun buildCourseIndexes()
     })
 
     courses.forEach { course ->
-        val resp = fetchStudentDataSubPage(
-            page = "coursesummary",
-            params = "&courseCode=${course.code}&courseSection=${course.section}"
-        )
-
-        val courseName = htmlDocument(resp) {
+        val summary = course.courseSummary()
+        val courseName = htmlDocument(summary) {
             table {
                 select {
                     findLast {
@@ -110,6 +124,74 @@ suspend fun buildCourseIndexes()
 
         course.name = courseName
     }
+}
+
+var initialIndexBuild = true
+suspend fun rebuildAssignmentIndexes()
+{
+    courses.forEach { course ->
+        val summary = course.courseSummary()
+        val assignments = mutableListOf<Assignment>()
+
+        htmlDocument(summary) {
+            table {
+                tr {
+                    withClass = "listrowodd"
+                    findAll {
+                        var date = ""
+                        var name = ""
+                        var someGrade: String? = ""
+
+                        td {
+                            findFirst {
+                                date += text
+                            }
+
+                            findAll {
+                                forEach {
+                                    if ("%" in it.text)
+                                    {
+                                        val percentMatches = percentageMatcher.findAll(it.text)
+                                            .toList()
+                                            .firstOrNull()
+                                        someGrade = percentMatches?.value
+                                    }
+                                }
+                            }
+                        }
+
+                        b {
+                            findFirst {
+                                name = text
+                            }
+                        }
+
+                        val matchResults = dateMatcher.findAll(date).toList()
+                        if (matchResults.isNotEmpty())
+                        {
+                            assignments += Assignment(date = date, name = name, grade = someGrade)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (course.assignments.size < assignments.size)
+        {
+            val prevSize = course.assignments.size
+            synchronized(course.lockObject) {
+                course.assignments.clear()
+                course.assignments.addAll(assignments)
+            }
+
+            if (!initialIndexBuild)
+            {
+                println("${course.name} received updates with ${assignments.size - prevSize} new assignments!")
+            }
+        }
+    }
+
+    initialIndexBuild = false
 }
 
 val client = HttpClient(CIO) {
@@ -170,18 +252,37 @@ suspend fun fetchStudentDataSubPage(page: String, params: String = ""): String
         .bodyAsText()
 }
 
-suspend fun main()
+fun main()
 {
-    ensureConfigCreated()
-    updateSessionId()
-    println(
-        "Listening to courses ${
-            GenesisProps.courses
-        }"
-    )
+    val startMillis = System.currentTimeMillis()
+    runBlocking {
+        ensureConfigCreated()
+        updateSessionId()
 
-    buildCourseIndexes()
-    println("Built course indexes. ${courses.size} courses found. ${
-        courses.count { it.name in GenesisProps.courses }
-    } courses being listened to are available.")
+        buildCourseIndexes()
+        println("Built course indexes. ${courses.size} courses found.")
+    }
+
+    while (true)
+    {
+        val initial = initialIndexBuild
+        if (initial)
+        {
+            println("Please wait as we rebuild course indexes...")
+        }
+
+        runBlocking {
+            rebuildAssignmentIndexes()
+        }
+
+        if (initial)
+        {
+            println("Rebuilt assignment indexes. Took ${
+                (System.currentTimeMillis() - startMillis) / 1000L
+            } seconds to initialize the app.")
+            println("Assignment indexes will be updated every minute. Please keep this app open!")
+        }
+
+        Thread.sleep(1000L * 60L)
+    }
 }
