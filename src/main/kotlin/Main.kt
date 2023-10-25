@@ -228,7 +228,7 @@ suspend fun rebuildAssignmentIndexes(client: WebhookClient)
                     .setDescription(
                         """
                             New grades have been posted for your **${course.name}** course:
-                            ${newAssignments.joinToString("\n") { "> ${it.name}: **${it.grade}**" }}
+                            ${newAssignments.joinToString("\n") { "> ${it.name}: **${"You Did Fine."}**" }}
                             
                             Click the title to see additional grade details!
                         """.trimIndent()
